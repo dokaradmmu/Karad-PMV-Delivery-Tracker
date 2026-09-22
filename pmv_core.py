@@ -46,7 +46,17 @@ import pandas as pd
 COL_BARCODE = "Bar Code ID"
 COL_APP_NO = "PMV Application Number"
 COL_ARTISAN_NAME = "Artisan Name"
-COL_MOBILE = "Mobile Number"
+COL_MOBILE = "Mobile No"
+
+# The PMV export schema changed on/around 22.09.2026: "Mobile No" was
+# renamed to "New Mobile No", with two extra columns inserted
+# ("Previous Mobile No", "Mobile No Changed Date"). We normalize any of
+# these newer-schema exports back down to the original schema at load
+# time (see load_pmv_report), so everything downstream — jurisdiction
+# tagging, the diff logic, the Excel writer, the Streamlit UI — stays
+# unchanged regardless of which export schema a given file uses.
+NEW_SCHEMA_MOBILE_COL = "New Mobile No"
+NEW_SCHEMA_EXTRA_COLS = ["Previous Mobile No", "Mobile No Changed Date"]
 COL_ADDRESS = "Artisan Current Address"
 COL_CIRCLE = "Circle Name"
 COL_DIVISION_RAW = "Division Name"  # NOTE: unusable in source data, see below
@@ -96,6 +106,17 @@ def load_pmv_report(csv_path: str | Path) -> pd.DataFrame:
         df = df.drop(columns=unnamed)
 
     df.columns = [c.strip() for c in df.columns]
+
+    # Normalize newer-schema exports (22.09.2026 onward) back to the
+    # original schema: rename "New Mobile No" -> COL_MOBILE, and discard
+    # "Previous Mobile No" / "Mobile No Changed Date" entirely so they
+    # never reach the output sheets. Older exports (pre-22.09, already
+    # using COL_MOBILE directly) pass through unchanged.
+    if NEW_SCHEMA_MOBILE_COL in df.columns:
+        df = df.rename(columns={NEW_SCHEMA_MOBILE_COL: COL_MOBILE})
+    extra_present = [c for c in NEW_SCHEMA_EXTRA_COLS if c in df.columns]
+    if extra_present:
+        df = df.drop(columns=extra_present)
 
     missing = [c for c in REQUIRED_PMV_COLUMNS if c not in df.columns]
     if missing:
